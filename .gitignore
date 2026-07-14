@@ -1,0 +1,41 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 虚拟环境
+.venv/
+venv/
+env/
+.env/
+
+# Conda 环境相关
+.conda/
+
+# VS Code 本地设置
+.vscode/
+
+# macOS 系统文件
+.DS_Store
+__MACOSX/
+
+# 原始和生成的数据
+data/
+translated_data/
+*.pt
+
+# 模型权重和训练输出
+checkpoints/
+*.pth
+*.ckpt
+
+# 日志
+logs/
+runs/
+*.log
+
+# Jupyter 临时文件
+.ipynb_checkpoints/
+
+# 临时文件
+*.tmp
+*.temp
