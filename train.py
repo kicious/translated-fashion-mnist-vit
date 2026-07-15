@@ -1,128 +1,87 @@
 import argparse
 import os
 import time
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from datasets.translated_fmnist import TranslatedFashionMNIST
 from models.vit import ViT
+from datasets.translated_fmnist import TranslatedFashionMNIST
 from utils import AverageMeter, accuracy
 
-
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description='Pytorch Translated FashionMNIST Training')
 
-    parser.add_argument(
-        "--train-data",
-        default="./translated_data/translated_fmnist_train.pt",
-    )
-    parser.add_argument(
-        "--val-data",
-        default="./translated_data/translated_fmnist_test.pt",
-    )
+    # Dataset
+    parser.add_argument('--train-data',type=str,default='./translated_data/translated_fashion_mnist_train.pt',help='path to train data')
+    parser.add_argument('--val-data',type=str,default='./translated_data/translated_fashion_mnist_test.pt',help='path to val data')
 
-    parser.add_argument("--img-size", type=int, default=128)
-    parser.add_argument("--patch-size", type=int, default=16)
-    parser.add_argument("--embed-dim", type=int, default=128)
-    parser.add_argument("--depth", type=int, default=4)
-    parser.add_argument("--num-heads", type=int, default=4)
+    #Model
+    parser.add_argument('--img-size',type=int,default=128,help='input image size')
+    parser.add_argument('--patch-size',type=int,default=16,help='patch size')
+    parser.add_argument('--embed-dim',type=int,default=128,help='enbedding dimension')
+    parser.add_argument('--depth',type=int,default=4,help='transformer encoder')
+    parser.add_argument('--num-heads',type=int,default=4,help='number of attention heads')
 
-    parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--batch-size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    # Optimization
+    parser.add_argument('--epoches',default=15,type=int,help='number of total epochs to run')
+    parser.add_argument('--batch-size',default=128,type=int,help='mini-batch size')
+    parser.add_argument('--lr','--learning-rate',default=1e-3,type=float,help='initial learning rate',dest='lr')
+    parser.add_argument('--weight-decay',default=1e-4,type=float,help='weight decay')
 
-    parser.add_argument("--print-freq", type=int, default=50)
-    parser.add_argument("--save-dir", default="./checkpoints")
-    parser.add_argument("--num-workers", type=int, default=0)
+    #Misc
+    parser.add_argument('--print-freq',default=50,type=int,help='print frequency')
+    parser.add_argument('--save-dir',default='./checkpoints',type=str,help='path to save checkpoints')
 
-    return parser.parse_args()
-
-
-def choose_device():
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
+    args = parser.parse_args()
+    return args
 
 def main():
     args = parse_args()
-    device = choose_device()
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     print(f"=> Using device: {device}")
+
     os.makedirs(args.save_dir, exist_ok=True)
 
+    #1.Dataset & DataLoader
+    print("=> Loading datasets...")
     train_dataset = TranslatedFashionMNIST(args.train_data)
     val_dataset = TranslatedFashionMNIST(args.val_data)
+    
+    train_loader = DataLoader(train_dataset,batch_size=args.batch_size,shuffle = True,num_workers=4,pin_memory=True)
+    val_loader = DataLoader(val_dataset,batch_size=args.batch_size,shuffle = False,num_workers=4,pin_memory=True)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-    )
-
+    #2.Model
+    print("=>Building model...")
     model = ViT(
         img_size=args.img_size,
         patch_size=args.patch_size,
         embed_dim=args.embed_dim,
         depth=args.depth,
-        num_heads=args.num_heads,
+        num_heads=args.num_heads
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss().to(device)
+    #3.Criterion & Optimizer
+    criterion = nn.CrossEntroyLoss().to(device)
+    optimizer = optim.AdamW(model.parameters(),lr=args.lr,weight_decay=args.weight_decay)
 
-    optimizer = optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-    )
-
+    #4.Training Loop
     best_acc = 0.0
-
     for epoch in range(args.epochs):
-        print(f"\n========== Epoch {epoch + 1}/{args.epochs} ==========")
+        train(train_loader,model,criterion,optimizer,epoch,device,args)
 
-        train(
-            train_loader,
-            model,
-            criterion,
-            optimizer,
-            epoch,
-            device,
-            args,
-        )
+        val_acc = validate(val_loader,model,criterion,device,args)
 
-        val_acc = validate(
-            val_loader,
-            model,
-            criterion,
-            device,
-        )
-
+        #Save best model
         if val_acc > best_acc:
             best_acc = val_acc
-            save_path = os.path.join(args.save_dir, "model_best.pth")
-            torch.save(model.state_dict(), save_path)
-            print(
-                f"=> Best model saved at epoch {epoch + 1} "
-                f"with acc {best_acc:.2f}%"
-            )
+            save_path = os.path.join(args.save_dir,'model_best.pth')
+            torch.save(model.state_dict(),save_path)
+            print("=> Best model saved at epoch {epoch} with acc {best_acc:.2f}%")
 
-
-def train(train_loader, model, criterion, optimizer, epoch, device, args):
+def train(train_loader,model,criterion,optimizer,epoch,device,args):
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
@@ -130,57 +89,56 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
     model.train()
     end = time.time()
 
-    for i, (images, labels) in enumerate(train_loader):
-        images = images.to(device)
-        labels = labels.to(device)
+    for i,(images,labels) in enumerate(train_loader):
+        images,labels = images.to(device),labels.to(device)
 
+        #Compute output
         outputs = model(images)
-        loss = criterion(outputs, labels)
+        loss = criterion(outputs,labels)
 
-        acc1, = accuracy(outputs, labels, topk=(1,))
-        losses.update(loss.item(), images.size(0))
-        top1.update(acc1.item(), images.size(0))
+        #Measure accuracy and record loss
+        acc1, = accuracy(outputs,labels,topk=(1,))
+        losses.update(loss.item(),images.size(0))
+        top1.update(acc1.item(),images.size(0))
 
+        #Compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
+        #Measure elapsed time 
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
-            print(
-                f"Epoch: [{epoch + 1}][{i}/{len(train_loader)}]\t"
-                f"Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t"
-                f"Loss {losses.val:.4f} ({losses.avg:.4f})\t"
-                f"Acc@1 {top1.val:.3f} ({top1.avg:.3f})"
-            )
-
-
-@torch.no_grad()
-def validate(val_loader, model, criterion, device):
+        if i% args.print_freq == 0:
+            print(f"Epoch:[{epoch}][{i}/{len(train_loader)}]\t"
+                  f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                  f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
+                  f'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'  )
+            
+def validate(val_loader,model,criterion,device,args):
+    batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
 
     model.eval()
+    end = time.time()
 
-    for images, labels in val_loader:
-        images = images.to(device)
-        labels = labels.to(device)
+    with torch.no_grad():
+        for i, (images,labels) in enumerate(val_loader):
+            images,labels = images.to(device),labels.to(device)
 
-        outputs = model(images)
-        loss = criterion(outputs, labels)
+            outputs = model(images)
+            loss = criterion(outputs,labels)
 
-        acc1, = accuracy(outputs, labels, topk=(1,))
-        losses.update(loss.item(), images.size(0))
-        top1.update(acc1.item(), images.size(0))
+            acc1, = accuracy(outputs,labels,topk=(1,))
+            losses.update(loss.item(),images.size(0))
+            top1.update(acc1.item(),images.size(0))
 
-    print(
-        f" * Validation Acc@1 {top1.avg:.3f}% "
-        f"| Loss {losses.avg:.4f}"
-    )
-    return top1.avg
+            batch_time.update(time.time() - end)
+            end = time.time()
+        print(f'* Validation Acc@1 {top1.avg:.3f}% | Loss {losses.avg:.4f}')
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+             

@@ -1,7 +1,9 @@
 import torch
 
 
-class AverageMeter:
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
     def __init__(self):
         self.reset()
 
@@ -18,18 +20,20 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-@torch.no_grad()
 def accuracy(output, target, topk=(1,)):
-    maxk = max(topk)
-    batch_size = target.size(0)
+    """Computes the accuracy over the k top predictions
+    for the specified values of k"""
 
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
 
-    result = []
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).float().sum(0)
-        result.append(correct_k.mul_(100.0 / batch_size))
+        _, pred = output.topk(maxk,1,True,True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
 
-    return result
+        res = []
+        for k in topk:
+            correct_k = (correct[:k].reshape(-1).float().sum(0, keepdim=True))
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
