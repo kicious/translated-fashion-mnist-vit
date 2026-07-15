@@ -1,6 +1,9 @@
 import argparse
 import os
 import time
+import csv
+from datetime import datetime
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,8 +17,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Pytorch Translated FashionMNIST Training')
 
     # Dataset
-    parser.add_argument('--train-data',type=str,default='./translated_data/translated_fashion_mnist_train.pt',help='path to train data')
-    parser.add_argument('--val-data',type=str,default='./translated_data/translated_fashion_mnist_test.pt',help='path to val data')
+    parser.add_argument('--train-data',type=str,default='./translated_data/translated_fmnist_train.pt',help='path to train data')
+    parser.add_argument('--val-data',type=str,default='./translated_data/translated_fmnist_test.pt',help='path to val data')
 
     #Model
     parser.add_argument('--img-size',type=int,default=128,help='input image size')
@@ -25,7 +28,7 @@ def parse_args():
     parser.add_argument('--num-heads',type=int,default=4,help='number of attention heads')
 
     # Optimization
-    parser.add_argument('--epoches',default=15,type=int,help='number of total epochs to run')
+    parser.add_argument('--epochs',default=15,type=int,help='number of total epochs to run')
     parser.add_argument('--batch-size',default=128,type=int,help='mini-batch size')
     parser.add_argument('--lr','--learning-rate',default=1e-3,type=float,help='initial learning rate',dest='lr')
     parser.add_argument('--weight-decay',default=1e-4,type=float,help='weight decay')
@@ -64,22 +67,56 @@ def main():
     ).to(device)
 
     #3.Criterion & Optimizer
-    criterion = nn.CrossEntroyLoss().to(device)
+    criterion = nn.CrossEntropyLoss().to(device)
     optimizer = optim.AdamW(model.parameters(),lr=args.lr,weight_decay=args.weight_decay)
+
+    # code to create CSV file for training log
+    os.makedirs("results", exist_ok=True)
+    run_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join("results",f"experiment_{run_time}.csv",)
+    with open(csv_path,mode="w",newline="",encoding="utf-8",)as file:
+        writer = csv.writer(file)
+        writer.writerow(["epoch","train_loss","train_acc","val_loss","val_acc","learning_rate",])
+    print(f"=> Training log will be saved to: {csv_path}")
 
     #4.Training Loop
     best_acc = 0.0
     for epoch in range(args.epochs):
-        train(train_loader,model,criterion,optimizer,epoch,device,args)
-
-        val_acc = validate(val_loader,model,criterion,device,args)
-
-        #Save best model
+        #训练一整轮，并接收这一轮的平均训练 loss 和 accuracy
+        train_loss,train_acc = train(train_loader,model,criterion,optimizer,epoch,device,args)
+        #在验证集上测试，并接受平均验证 loss 和 accuracy
+        val_loss,val_acc = validate(val_loader,model,criterion,device,args)
+        #读取当前学习率
+        current_lr = optimizer.param_groups[0]["lr"]
+        #把这一轮的结果追加到 CSV 文件
+        with open(csv_path,mode="a",newline="",encoding="utf-8",)as file:
+            writer = csv.writer(file)
+            writer.writerow([epoch+1,train_loss,train_acc,val_loss,val_acc,current_lr])
+        print(
+            f"=> Epoch {epoch+1} result: "
+            f"train_loss {train_loss:.4f}, "
+            f"train_acc {train_acc:.3f}% "
+            f"val_loss {val_loss:.4f}, "
+            f"val_acc {val_acc:.3f}% "
+        )
+        # 如果当前验证准确率高于之前的最高值，就保存模型
         if val_acc > best_acc:
             best_acc = val_acc
             save_path = os.path.join(args.save_dir,'model_best.pth')
             torch.save(model.state_dict(),save_path)
-            print("=> Best model saved at epoch {epoch} with acc {best_acc:.2f}%")
+            print(f"=> Best model saved at epoch {epoch+1} with val_acc {val_acc:.3f}% ")
+
+    print(f"=> Training completed.")
+    print(f"=> Best validation accuracy: {best_acc:.3f}%")
+    print(f"=> CSV log saved to: {csv_path}")
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth'):
+    """
+    Save checkpoint.
+    """
+    torch.save(state, filename)
+    if is_best:
+        torch.save(state, 'model_best.pth')
 
 def train(train_loader,model,criterion,optimizer,epoch,device,args):
     batch_time = AverageMeter()
@@ -109,12 +146,13 @@ def train(train_loader,model,criterion,optimizer,epoch,device,args):
         #Measure elapsed time 
         batch_time.update(time.time() - end)
         end = time.time()
-
+  
         if i% args.print_freq == 0:
             print(f"Epoch:[{epoch}][{i}/{len(train_loader)}]\t"
                   f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
                   f'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'  )
+    return losses.avg,top1.avg
             
 def validate(val_loader,model,criterion,device,args):
     batch_time = AverageMeter()
@@ -138,6 +176,7 @@ def validate(val_loader,model,criterion,device,args):
             batch_time.update(time.time() - end)
             end = time.time()
         print(f'* Validation Acc@1 {top1.avg:.3f}% | Loss {losses.avg:.4f}')
+        return losses.avg,top1.avg
 
 if __name__ == '__main__':
     main()
