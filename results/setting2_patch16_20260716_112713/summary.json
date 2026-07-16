@@ -1,0 +1,11 @@
+{
+    "setting": 2,
+    "description": "B训练集 -> B测试集",
+    "patch_size": 16,
+    "best_epoch": 15,
+    "best_test_acc": 88.22,
+    "final_train_loss": 0.25307026196320853,
+    "final_train_acc": 90.48833333333334,
+    "final_test_loss": 0.32712152047753335,
+    "final_test_acc": 88.22
+}
