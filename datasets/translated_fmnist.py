@@ -3,24 +3,31 @@ from torch.utils.data import Dataset
 
 
 class TranslatedFashionMNIST(Dataset):
-    #python类的构造函数，负责在对象创建时完成初始化工作
+    """
+    读取generate_data.py生成的.pt文件。
+    """
+
     def __init__(self, data_path):
-        super(TranslatedFashionMNIST, self).__init__()
+        super().__init__()
 
-        # 加载预生成的 .pt 文件，保存图像，标签，位置信息
-        data = torch.load(data_path)
-        self.images = data['images']
-        self.labels = data['labels']
-        self.positions = data['positions']
+        data = torch.load(
+            data_path,
+            map_location="cpu",
+            weights_only=True,
+        )
 
-    #数据集的样本数量
+        #原始像素范围是0到255
+        #除以255之后转换到0到1
+
+        self.images = data["images"].float() / 255.0
+        self.labels = data["labels"].long()
+        self.positions = data["positions"].long()
+
     def __len__(self):
         return len(self.labels)
 
-    #根据索引idx取出一个样本
     def __getitem__(self, idx):
         img = self.images[idx]
         label = self.labels[idx]
 
-        # 如果需要位置信息作为辅助任务，可以 return pos
         return img, label

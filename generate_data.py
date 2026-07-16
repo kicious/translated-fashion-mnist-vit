@@ -1,132 +1,245 @@
 import os
+import random
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import numpy as np
 import torch
-import torchvision
-from torchvision import transforms
+from torchvision.datasets import FashionMNIST
 
 
-def create_translated_fashion_mnist( root_dir="./data", save_dir="./translated_data", canvas_size=128,is_train=True):
+#原始图片大小为28x28
+#这里将原始图片放到64x64的画布中
+
+CANVAS_SIZE = 64
+IMAGE_SIZE = 28
+
+DATA_ROOT = "./data"
+SAVE_ROOT = "./translated_data"
+
+SEED = 42
+
+
+def set_seed(seed):
     """
-    生成位置可变的 FashionMNIST 并保存。
+    固定随机种子，使实验结果可以复现。
     """
-    # 加载原始的FashionMNIST（28×28）
-    origin_dataset = torchvision.datasets.FashionMNIST( root=root_dir,train=is_train,download=True,transform=transforms.ToTensor())
-    #记录下样本数量，小图像大小
-    num_samples = len(origin_dataset)
-    img_size = 28
-    # 预分配张量(提前创建内存空间)，图像形状：(N, 1, canvas_size, canvas_size)
-    translated_images = torch.zeros((num_samples, 1, canvas_size, canvas_size),dtype=torch.float32)
-    # 初始化标签    
-    labels = torch.zeros(num_samples, dtype=torch.long)
-    # 保存每张图片左上角的 (y, x) 坐标
-    positions = torch.zeros( (num_samples, 2),dtype=torch.long,)
- 
-    #真正开始生成数据
-    split_name = "训练集" if is_train else "测试集"
-    print(f"正在生成 {split_name}（共 {num_samples} 个样本）...")
-    for i in range(num_samples):
-        # img 的形状是 (1, 28, 28)
-        img, label = origin_dataset[i]
-        # 生成随机位置，确保图片完全在画布内
-        max_y = canvas_size - img_size
-        max_x = canvas_size - img_size
-        y = np.random.randint(0,max_y + 1,)
-        x = np.random.randint( 0, max_x + 1,)
-        # 将原图放入大画布
-        translated_images[i,0, y:y + img_size, x:x + img_size,] = img[0]
-        # 保存标签
-        labels[i] = label
-        # 保存位置
-        positions[i] = torch.tensor([y,x])
-        # 打印进度
-        if (i + 1) % 5000 == 0:
-            print(f"已完成 {i + 1}/{num_samples}")
-                
-    # 保存数据
-    # 创建保存目录
-    os.makedirs(save_dir,exist_ok=True)
-    # 训练集与测试集使用不同文件名
-    filename = (
-        f"translated_fmnist_"
-        f"{'train' if is_train else 'test'}.pt"
+
+    random.seed(seed)
+    torch.manual_seed(seed)
+
+
+def generate_dataset(
+    train,
+    mode,
+    save_path,
+    seed,
+):
+    """
+    生成位置变化后的FashionMNIST数据集。
+
+    mode="random"：
+    图片随机放在画布中，对应情况A。
+
+    mode="center"：
+    图片固定放在画布中央，对应情况B。
+    """
+
+    set_seed(seed)
+
+    dataset = FashionMNIST(
+        root=DATA_ROOT,
+        train=train,
+        download=True,
     )
-    save_path = os.path.join(save_dir, filename)
-    #将图片、标签、位置保存到同一个 .pt 文件
+
+    images = dataset.data
+    labels = dataset.targets
+
+    num_samples = len(images)
+
+    new_images = torch.zeros(
+        num_samples,
+        1,
+        CANVAS_SIZE,
+        CANVAS_SIZE,
+        dtype=torch.uint8,
+    )
+
+    positions = torch.zeros(
+        num_samples,
+        2,
+        dtype=torch.long,
+    )
+
+    max_offset = CANVAS_SIZE - IMAGE_SIZE
+
+    for i in range(num_samples):
+        image = images[i]
+
+        if mode == "random":
+            top = random.randint(0, max_offset)
+            left = random.randint(0, max_offset)
+
+        elif mode == "center":
+            top = max_offset // 2
+            left = max_offset // 2
+
+        else:
+            raise ValueError(
+                "mode必须是random或者center"
+            )
+
+        new_images[
+            i,
+            0,
+            top:top + IMAGE_SIZE,
+            left:left + IMAGE_SIZE,
+        ] = image
+
+        positions[i, 0] = top
+        positions[i, 1] = left
+
+        if (i + 1) % 5000 == 0:
+            print(
+                f"已经处理 {i + 1}/{num_samples} 张图片"
+            )
+
+    data = {
+        "images": new_images,
+        "labels": labels,
+        "positions": positions,
+        "canvas_size": CANVAS_SIZE,
+        "mode": mode,
+    }
+
     torch.save(
-        {
-            "images": translated_images,
-            "labels": labels,
-            "positions": positions,
-        },
+        data,
         save_path,
     )
-    print( f"数据已保存至：{save_path}\n")
 
-    # 返回数据
-    return (translated_images,labels,positions,)
-        
-    
+    print(f"数据已经保存到：{save_path}")
+
+    return new_images, labels, positions
 
 
-def show_examples(images, labels, positions,count=6):
+def save_examples(
+    images,
+    labels,
+    positions,
+    save_path,
+    title,
+):
     """
-    显示若干生成后的样本。
+    保存6张数据集样例，用于实验报告。
     """
-    count = min( count,len(images))
-    fig, axes = plt.subplots(2,3,figsize=(10,7))
+
+    figure, axes = plt.subplots(
+        2,
+        3,
+        figsize=(9, 7),
+    )
+
     axes = axes.reshape(-1)
 
-    for i in range(count):
-        axes[i].imshow(images[i, 0],cmap="gray",)
-        y, x = positions[i].tolist()
-       # 使用红色方框标记原图位置
-        rect = patches.Rectangle(
-            (x, y),
-            28,
-            28,
-            linewidth=1.5,
-            edgecolor="red",
-            facecolor="none",
+    for i in range(6):
+        axes[i].imshow(
+            images[i, 0].numpy(),
+            cmap="gray",
         )
-        axes[i].add_patch(rect)
+
+        top = positions[i, 0].item()
+        left = positions[i, 1].item()
+
         axes[i].set_title(
-            f"label={int(labels[i])}, "
-            f"pos=({y}, {x})"
+            f"label={labels[i].item()}\n"
+            f"position=({top}, {left})"
         )
+
         axes[i].axis("off")
 
-    plt.tight_layout()
-    plt.show()
+    figure.suptitle(title)
+    figure.tight_layout()
+
+    figure.savefig(
+        save_path,
+        dpi=200,
+        bbox_inches="tight",
+    )
+
+    plt.close(figure)
+
+    print(f"样例图片已经保存到：{save_path}")
 
 
-#只有该文件被直接运行时才会执行以下代码
+def main():
+    os.makedirs(
+        SAVE_ROOT,
+        exist_ok=True,
+    )
+
+    #A训练集：图片随机平移
+
+    a_train_images, a_train_labels, a_train_positions = (
+        generate_dataset(
+            train=True,
+            mode="random",
+            save_path="./translated_data/A_train.pt",
+            seed=SEED,
+        )
+    )
+
+    #A测试集：图片随机平移
+    #使用不同的随机种子，使测试集位置不同
+
+    generate_dataset(
+        train=False,
+        mode="random",
+        save_path="./translated_data/A_test.pt",
+        seed=SEED + 1,
+    )
+
+    #B训练集：图片固定在画布中央
+
+    b_train_images, b_train_labels, b_train_positions = (
+        generate_dataset(
+            train=True,
+            mode="center",
+            save_path="./translated_data/B_train.pt",
+            seed=SEED,
+        )
+    )
+
+    #B测试集：图片固定在画布中央
+
+    generate_dataset(
+        train=False,
+        mode="center",
+        save_path="./translated_data/B_test.pt",
+        seed=SEED,
+    )
+
+    save_examples(
+        images=a_train_images,
+        labels=a_train_labels,
+        positions=a_train_positions,
+        save_path="./translated_data/A_examples.png",
+        title="Dataset A: Random Translation",
+    )
+
+    save_examples(
+        images=b_train_images,
+        labels=b_train_labels,
+        positions=b_train_positions,
+        save_path="./translated_data/B_examples.png",
+        title="Dataset B: Centered Images",
+    )
+
+    print()
+    print("所有数据已经生成完成：")
+    print("A_train.pt：随机平移训练集")
+    print("A_test.pt ：随机平移测试集")
+    print("B_train.pt：固定居中训练集")
+    print("B_test.pt ：固定居中测试集")
+
+
 if __name__ == "__main__":
-    # 固定随机种子，便于复现实验
-    np.random.seed(42)
-    torch.manual_seed(42)
-
-    # 生成训练集
-    train_images, train_labels, train_positions = (
-        create_translated_fashion_mnist(
-            canvas_size=128,
-            is_train=True,
-        )
-    )
-
-    # 生成测试集
-    test_images, test_labels, test_positions = (
-        create_translated_fashion_mnist(
-            canvas_size=128,
-            is_train=False,
-        )
-    )
-
-    # 显示训练集中的前 6 个样本
-    show_examples(
-        train_images,
-        train_labels,
-        train_positions,
-    )
+    main()

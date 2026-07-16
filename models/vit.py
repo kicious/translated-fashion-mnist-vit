@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class ViT(nn.Module):
-    def __init__(self, img_size=128, patch_size=16, in_chans=1,  num_classes=10,
+    def __init__(self, img_size=64, patch_size=16, in_chans=1,  num_classes=10,
                   embed_dim=128,depth=4,num_heads=4,mlp_ratio=4.0):
         super(ViT, self).__init__()
         self.img_size = img_size
